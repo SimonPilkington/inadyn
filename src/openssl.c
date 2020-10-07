@@ -242,6 +242,38 @@ int ssl_send(http_t *client, const char *buf, int len)
 	return 0;
 }
 
+void DumpHex(const void* data, size_t size, char *dest)
+ {
+	char buf[128];
+	char ascii[17];
+	size_t i, j;
+	ascii[16] = '\0';
+	for (i = 0; i < size; ++i) {
+		sprintf(dest+strlen(dest), "%02X ", ((unsigned char*)data)[i]);
+		if (((unsigned char*)data)[i] >= ' ' && ((unsigned char*)data)[i] <= '~') {
+			ascii[i % 16] = ((unsigned char*)data)[i];
+		} else {
+			ascii[i % 16] = '.';
+		}
+		if ((i+1) % 8 == 0 || i+1 == size) {
+			sprintf(dest+strlen(dest), " ");
+			if ((i+1) % 16 == 0) {
+				sprintf(dest+strlen(dest), "|  %s \n", ascii);
+			} else if (i+1 == size) {
+				ascii[(i+1) % 16] = '\0';
+				if ((i+1) % 16 <= 8) {
+					sprintf(dest+strlen(dest), " ");
+				}
+				for (j = (i+1) % 16; j < 16; ++j) {
+					sprintf(dest+strlen(dest), "   ");
+				}
+				sprintf(dest+strlen(dest), "|  %s \n", ascii);
+			}
+		}
+	}
+}
+
+
 int ssl_recv(http_t *client, char *buf, int buf_len, int *recv_len)
 {
 	int len, rc, err = SSL_ERROR_NONE;
@@ -261,17 +293,35 @@ int ssl_recv(http_t *client, char *buf, int buf_len, int *recv_len)
 		ssl_check_error();
 		return RC_HTTPS_RECV_ERROR;
 	}
+
 	*recv_len += len;
+
+	logit(LOG_DEBUG, "Received response headers (%d)", *recv_len);
+	logit(LOG_DEBUG, "Headers:\n %.*s\n------------", *recv_len, buf);
 
 	/* Read HTTP body */
 	len = rc = SSL_read(client->ssl, &buf[len], buf_len - len);
 	if (rc <= 0) {
+		if (rc < 0)
+			logit(LOG_ERR, "Error occurred while receiving the body.");
 		ssl_check_error();
 		len = 0;
 	}
+
+	logit(LOG_DEBUG, "Received response body (%d)", len);
+	logit(LOG_DEBUG, "Body:\n %.*s\n------------", len, buf+*recv_len);
+
 	*recv_len += len;
+
 	logit(LOG_DEBUG, "Successfully received HTTPS response (%d bytes)!", *recv_len);
 
+	{
+		char *memdump = calloc(64*1024, sizeof(char));
+		DumpHex(buf, buf_len, memdump);
+		logit(LOG_DEBUG, "Buffer contents:\n%s", memdump);
+
+		free(memdump);
+	}
 	return 0;
 }
 
